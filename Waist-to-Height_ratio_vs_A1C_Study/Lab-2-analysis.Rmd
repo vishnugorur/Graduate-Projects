@@ -1,0 +1,534 @@
+---
+title: "Lab 2 - A1C vs Waist-To-Height Ratio Descriptive Analysis" 
+author: "Mukhammadali Fardaev, Umair Habib, Vishnu Gorur, Samuel Dominguez"
+subtitle: "Github Repository: https://github.com/mids-w203/lab2-Dominguez-Fardaev-Gorur-Habib"
+date: today 
+date-format: long
+format: 
+  pdf: 
+    documentclass: scrartcl
+    classoption: [11pt, onecolumn]
+    header-includes: |
+      \usepackage{indentfirst}
+      \setlength{\parindent}{2em}   
+      \setlength{\parskip}{0em}       
+editor: visual
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(caret)
+library(car)
+library(broom)
+library(ggplot2)
+library(lmtest)
+library(sandwich)
+library(moments)
+library(tseries)
+library(gridExtra)
+library(stargazer)
+library(cowplot)
+library(knitr)
+
+```
+
+\newpage
+
+## Introduction
+
+Diabetes is a disease, approximately affecting 38.4 million Americans as of 2021^\[1\]^, that occurs when the body cannot control blood glucose (sugar) levels due to a lack of Insulin damaging organs^\[1\]^. One of the important factors to look at in patients is their A1C level as it represents the patient’s average blood glucose levels for the past 3 months^\[2\]^. While measurements related to mass and obesity are useful, as used by ADA guidelines^\[2\]^, numerous existing studies have shown that waist to height ratio is a better metric when screening for diabetes and other diseases^\[3,4,5,6\]^. As this topic is at the forefront of public health, our team of data scientists represents a shared interest in better understanding the relationship between A1C levels and a variety of extrinsic factors as well as intrinsic health indicators.
+
+The main focus of our study is to answer the following question: Is there a significant relationship between waist-to-height ratio and A1C levels? Our initial hypothesis is that waist-to-height ratio is positively correlated with A1C levels. To answer this question and test our hypothesis, we will explore the following related questions: (1) How descriptive is a simple linear regression model as compared to a multiple linear regression model that accounts for differences in human biological systems and external socio-economic variables? (2) Is there an effect of ethnicity in the relationship between waist-to-height ratio and A1C levels, particularly when comparing Non-Hispanic Whites to other ethnic groups? (3) Is there a significant relationship between Insulin and A1C levels? (4) Do we have an omitted variable bias confounding the interpretability of our models?
+
+This descriptive study aims to provide insights for healthcare professionals to better identify diabetes risk factors.
+
+## Description of the Data Source
+
+This study utilizes data from the National Health and Nutrition Examination Survey (NHANES). NHANES combines interviews and physical examinations to collect data on a wide range of health indicators^\[7\]^. Our analysis specifically draws from the NHANES 2017-2018 dataset which includes a sample of 9,254 U.S. adults aged 12-80+, collected via trained interviewers using the Computer-Assisted Personal Interview system (Appendix A.3). This survey is cross-sectional as it contains self-reported measurements from the participants at one point in time during this 2017-2018 window. 
+
+However, there are limitations in the dataset as it was self-reported meaning that participants had the choice of not disclosing personal information as well as participants who did not know how to answer certain questions.
+
+## Data Wrangling
+
+We begin by merging 6 different NHANES datasets, namely diabetes questionnaires (DIQ_J), demographics (DEMO_J), glycemic markers (GHB_J), body measurements (BMX_J), triglycerides (TRIGLY_J), and insulin (INS_J). The joined dataset contains 9,254 observations with 133 variables. Then, to examine our research question, we transform the data to narrow down to 9 key variables: A1C (dependent variable), waist circumference, height, income-to-poverty ratio, age, pregnancy, triglycerides , insulin, gender, ethnicity, and family history of diabetes. The latter 3 variables, we consider them as covariates to investigate more in depth subgroup differences. 
+
+After cleaning the data to remove participants who are pregnant, under 18 years of age, have missing predictor variable values, or have missing A1C values, we rename variable names for clarity and recode the categorical variables into factor variables. Next, we split the cleaned dataset into 2 parts for development (exploratory_df) and validation (confirmatory_df) purposes using 3:7 ratio respectively.
+
+## Operationalization
+
+Broadly, the research question examines the relationship between various predictors and A1C. We combined height and waist circumference, both measured in centimeters, into a single variable (Waist circumference / height ratio). Family history is the response to the question of whether the respondent has been told they have a health condition or family history that increases their risk of diabetes, either Yes or No (Appendix A.2). Triglyceride levels are measured as milligrams per deciliter (mg/dL) (Appendix A.6) and insulin levels are measured in microunits per milliliter ($\mu$U/mL) (Appendix A.7). Income-to-poverty is measured as a continuous ratio variable by “dividing family (or individual) income by the poverty guidelines specific to the survey year” (Appendix A.3). Poverty could also be operationalized by comparing family income against the national poverty line^\[8\]^ for a binary impoverished or not impoverished value. However, the ratio provides a wider range of values that provide more granular information on a respondents income than a binary variable. Age is measured in years and gender is either Male or Female (Appendix A.3). Ethnicity is represented as numbers 1-7, with labels Mexican American, Other Hispanic, Non-Hispanic White, Non-Hispanic Black, Non-Hispanic Asian, Other Race - Including Multi-Racial, and Missing, respectively (Appendix A.3). Finally, according to the ADA, an A1C level below 5.7% is considered normal, 5.7-6.4% indicates pre-diabetic, and 6.5% or higher marks diabetes^\[2\]^. 
+
+Starting with 9,254 observations, 47 observations from pregnant participants and 3,398 observations from participants under 18 years of age were removed to reduce confounding due to altered metabolic states during pregnancy and adolescent development. Next, 595 observations with missing A1C values were removed. Finally, 3,503 observations with a missing predictor variable were removed (this can introduce potential biases: selection bias and attrition bias). This left 1,711 total observations and 11 variables for our descriptive analysis. Model specifications were tested against the explanatory dataset, which contained 30% of the observations and then tested against the confirmatory dataset containing the other 70% of observations.
+
+```{r, include=FALSE}
+nhanes_clean <- read_csv("../data/processed/nhanes_clean.csv")
+glimpse(nhanes_clean)
+```
+
+```{r, include=FALSE}
+nhanes_clean <- nhanes_clean %>%
+  mutate(
+    waist_height_ratio = ( waist_cm / height_cm )
+  )
+
+```
+
+```{r, include=FALSE}
+nhanes_clean$ethnicity <- factor(
+  nhanes_clean$ethnicity,
+  levels = c(
+    "Non-Hispanic White",        
+    "Mexican American",
+    "Other Hispanic",
+    "Non-Hispanic Black",
+    "Non-Hispanic Asian",
+    "Other/Multi-Racial"
+  )
+)
+```
+
+```{r, include=FALSE}
+# Data splitting
+set.seed(123)
+train_index <- createDataPartition(nhanes_clean$a1c, p = 0.3, list = FALSE)
+exploratory_df <- nhanes_clean[train_index, ]
+confirmatory_df <- nhanes_clean[-train_index, ]
+```
+
+```{r, include=FALSE}
+# Table
+data.frame(
+  dataset = c("Exploratory", "Confirmatory"),
+  n_obs = c(nrow(exploratory_df), nrow(confirmatory_df)),
+  mean_a1c = c(mean(exploratory_df$a1c), mean(confirmatory_df$a1c)),
+  mean_age = c(mean(exploratory_df$age), mean(confirmatory_df$age)),
+  mean_waist = c(mean(exploratory_df$waist_cm), mean(confirmatory_df$waist_cm)),
+  mean_height = c(mean(exploratory_df$height_cm), mean(confirmatory_df$height_cm)),
+  mean_triglycerides = c(mean(exploratory_df$triglycerides), mean(confirmatory_df$triglycerides)),
+  mean_insulin = c(mean(exploratory_df$insulin), mean(confirmatory_df$insulin))
+)
+```
+
+```{r, include=FALSE}
+model_1 <- lm(log(a1c) ~ waist_height_ratio, data = exploratory_df)
+summary(model_1)
+```
+
+```{r, include=FALSE}
+# Model with untransformed variables
+model_2 <- lm(
+  a1c ~ waist_height_ratio +
+    age +
+    gender +
+    ethnicity +
+    income_poverty_ratio +
+    family_history +
+    triglycerides +
+    insulin,
+  data = exploratory_df
+)
+summary(model_1)
+
+```
+
+```{r, include=FALSE}
+# Model with transformed variables A1C, Triglycerides, and Insulin
+model_3 <- lm(
+  log(a1c) ~ waist_height_ratio +
+    age +
+    gender +
+    ethnicity +
+    income_poverty_ratio +
+    family_history +
+    log(triglycerides) +
+    log(insulin),
+  data = exploratory_df
+)
+summary(model_2)
+```
+
+## Model Specification
+
+In order to examine the relationship between A1C and waist-to-height ratio along with other predictor variables, we developed 2 linear regression models on our exploratory dataset (`r nrow(exploratory_df)` observations). After, we applied the final features to the confirmatory dataset (`r nrow(confirmatory_df)` observations) to guarantee consistent description patterns.
+
+```{r, fig.align='center', fig.height=3, fig.width=12, out.width='100%', echo=FALSE}
+# Add log(A1C)
+exploratory_df <- exploratory_df %>%
+  mutate(log_a1c = log(a1c))
+
+# Set base plot theme
+base_theme <- theme_minimal(base_size = 10) +  
+  theme(
+    aspect.ratio = 1,                         
+    plot.title = element_text(face = "bold", size = 15), 
+    axis.title = element_text(size = 14), 
+    axis.text = element_text(size = 12)
+  )
+
+# A
+p1 <- ggplot(exploratory_df, aes(x = log_a1c)) +
+  geom_histogram(bins = 20, fill = "gray30", color = "white") +
+  labs(title = "A", x = "A1C", y = "Count") +
+  base_theme
+
+# B
+p2 <- ggplot(exploratory_df, aes(x = waist_height_ratio)) +
+  geom_histogram(bins = 20, fill = "gray30", color = "white") +
+  labs(title = "B", x = "Waist-to-Height Ratio", y = "Count") +
+  base_theme
+
+# C
+p3 <- ggplot(exploratory_df, aes(x = waist_height_ratio, y = a1c)) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_smooth(method = "lm", color = "blue", se = TRUE) +
+  labs(title = "C", x = "Waist-to-Height Ratio", y = "log(A1C)") +
+  base_theme
+
+p4 <- ggplot(exploratory_df, aes(x = waist_height_ratio, y = log_a1c)) +
+  geom_point(alpha = 0.5, size = 1) +
+  geom_smooth(method = "lm", color = "red", se = TRUE) +
+  labs(title = "C", x = "Waist-to-Height Ratio", y = "log(A1C)") +
+  base_theme
+
+# Arrange in one row
+plot_grid(p1, p2, p3, p4, nrow = 1, align = "hv")
+```
+
+Before proceeding with model design, we examined the distribution of A1C (Figure A), and waist-to-height ratio (Figure B). Our simple linear regression model was first built off untransformed A1C vs Waist-to-Height ratio (Figure C). However, as we added more variables, our model improved as we transformed A1C to log(A1C). We applied the log transformation as A1C was highly right-skewed. The transformation allowed us to maintain a log-linear model instead of adding more complicated transformations. Moreover, after reviewing the positively skewed distributions of triglycerides and insulin (Appendix C), we applied logarithmic transformation to these variables as well. Finally, we began by fitting the simple model to examine the relationship between the waist-to-height ratio and log(A1C) only.
+
+$$
+\log(\text{A1C}) = \beta_0 + \beta_1 \cdot \text{WaistHeightRatio} + \varepsilon
+$$We then, expanded the simple model by including more predictor variables, such as age, gender, ethnicity, income-to-poverty ratio, family history, triglycerides, and insulin together with the waist-to-height ratio.
+
+$$
+\begin{aligned}
+\log(\text{A1C}) &= \beta_0 + \beta_1 \cdot \text{WaistHeightRatio} + \beta_2 \cdot \text{Age} + \beta_3 \cdot \text{Gender} \\
+&\quad + \beta_4 \cdot \text{Ethnicity} + \beta_5 \cdot \text{IncomePovertyRatio} + \beta_6 \cdot \text{FamilyHistory} \\
+&\quad + \beta_7 \cdot \log(\text{Triglycerides}) + \beta_8 \cdot \log(\text{Insulin}) + \varepsilon
+\end{aligned}
+$$
+
+```{r, include=FALSE}
+
+bp_result <- bptest(model_3)
+
+bp_stat <- round(bp_result$statistic, 3)
+bp_df   <- bp_result$parameter
+bp_pval <- signif(bp_result$p.value, 4)
+```
+
+```{r rsq, include=FALSE}
+rsq_val <- summary(model_3)$r.squared
+rsq_rounded <- round(rsq_val, 2)
+```
+
+```{r, include=FALSE}
+shapiro_result <- shapiro.test(resid(model_3))
+shapiro_pval <- signif(shapiro_result$p.value, 4)
+```
+
+## Model Assumptions
+
+Our model meets most of the key assumptions for our regression model. The residual versus fitted plot shows that the residuals are randomly distributed around 0 and supports our second assumption of zero expectation conditional mean, as well as assumption of linearity (Appendix C). The variance of residuals is constant based on the Breusch-Pagan test (\text{BP} = `r bp_stat`,\quad \text{df} = `r bp_df`,\quad \text{p-value} = `r bp_pval`), revealing the homoscedasticity. However, the Shapiro test rejects the null hypothesis of normality of residual distribution with \text{p-value} of `r shapiro_pval`. For I.I.D, NHANES data are collected through sampling design that can cause geographic clustering and oversampling of subgroups^\[7\]^, violating the assumption to some extent.
+
+## Model Results and Interpretation
+
+```{r, include=FALSE}
+
+mod1 <- lm(log(a1c) ~ waist_height_ratio, data = confirmatory_df)
+
+mod2 <- lm(log(a1c) ~ waist_height_ratio + 
+             age +
+             gender +
+             ethnicity +
+             income_poverty_ratio +
+             family_history +
+             log(triglycerides) +
+             log(insulin),
+           data = confirmatory_df)
+
+```
+
+```{r, results='asis', echo=FALSE}
+
+stargazer(
+  mod1, mod2,
+  type = "latex",
+  single.row = TRUE,
+  no.space = TRUE,
+  font.size = "small",
+  column.sep.width = "3pt",
+  title = "Regression Model for A1C",
+  dep.var.labels = "log(A1C)",
+  covariate.labels = c( 
+    "Waist-Height Ratio", 
+    "Age", 
+    "Male",
+    "Mexican American", "Other Hispanic", "Non-Hispanic Black", 
+    "Non-Hispanic Asian", "Other/Multi-Racial",
+    "Income-to-Poverty Ratio", 
+    "Family History: Yes",
+    "Triglycerides (log)", 
+    "Insulin (log)"
+  ),
+  omit = "Constant",      
+  omit.stat = c("f", "ser"), 
+  digits = 2,
+  header = FALSE
+)
+
+```
+
+```{r, include=FALSE}
+anova_result <- anova(mod1, mod2)
+anova_pval <- signif(anova_result$"Pr(>F)"[2], 3)
+anova_pval
+```
+
+```{r, include=FALSE}
+rsq_mod1 <- summary(mod1)$r.squared
+rsq_mod2 <- summary(mod2)$r.squared
+
+# Round for reporting, Percentage scale
+rsq_mod1_rounded <- 100*round(rsq_mod1, 2)
+rsq_mod2_rounded <- 100*round(rsq_mod2, 2)
+rsq_mod2_rounded
+```
+
+```{r, include=FALSE}
+raw_pvals <- summary(mod2)$coefficients[, "Pr(>|t|)"]
+adjusted_pvals <- p.adjust(raw_pvals, method = "holm")
+pval_whr_adj <- adjusted_pvals["waist_height_ratio"]
+pval_ins_adj <- signif(adjusted_pvals["log(insulin)"],2)
+```
+
+```{r, include=FALSE}
+coef_mod1 <- round(coef(mod1)["waist_height_ratio"],2)
+coef_mod2 <- round(coef(mod2)["waist_height_ratio"],2)
+```
+
+```{r, include=FALSE}
+pvals <- summary(mod2)$coefficients[, "Pr(>|t|)"]
+ins_pval <- signif(pvals[13], 3)
+```
+
+Firstly, we conducted an Anova test and $R^2$ analysis to see if adding more predictors created statistically significant differences between our single and multiple linear regression models.
+
+$$
+\begin{aligned}
+H_0\!:&\ \beta_2 = \beta_3 = \beta_4 = \beta_5 = \beta_6 = \beta_7 = \beta_8 = 0 \\
+H_a\!:&\ \text{At least one } \beta_i \neq 0 \text{ for } i \in \{2,3,\dots,8\}
+\end{aligned}
+$$The Analysis of Variance table (anova) indicates a p-value of `r anova_pval` which is less than our $\alpha$ = 0.05, making it statistically significant and that the null hypothesis should be rejected. In broader terms, this anova test confirms that the additional predictors added improve the model fit and is able to explain more variation in A1C than waist-to-height ratio alone. As the highest value in the computed VIF values for our model (1.73) is below 4, there is no multicollinearity in our model. Additionally, the $R^2$ for our model is `r rsq_mod2_rounded`% meaning that `r rsq_mod2_rounded`% of the variation in the outcome variable can be explained by the variation in our predictor variables. Lastly, we applied Holm’s sequential method to avoid an issue with Family Wise Error Rates (FWER) and to ensure that the probability of making a Type I error is no greater than (0.05) (Appendix E).
+
+```{r, include=FALSE}
+# Extract coefficients
+coefs <- summary(mod2)$coefficients[, "Estimate"]
+
+# 1. Waist-to-Height Ratio
+whr_coef <- round(coefs["waist_height_ratio"], 2)
+whr_pct_increase <- round(100 * (exp(whr_coef) - 1), 2)
+
+# 2. Age
+age_coef <- round(coefs["age"], 2)
+age_pct_increase <- round(100 * (exp(age_coef) - 1), 2)
+
+# 3. Male
+male_coef <- round(coefs["genderMale"], 2)
+male_pct_increase <- round(100 * (exp(male_coef) - 1), 2)
+
+# 4. Mexican American
+ma_coef <- round(coefs["ethnicityMexican American"], 2)
+ma_pct_increase <- round(100 * (exp(ma_coef) - 1), 2)
+
+# 5. Other Hispanic
+oh_coef <- round(coefs["ethnicityOther Hispanic"], 2)
+oh_pct_increase <- round(100 * (exp(oh_coef) - 1), 2)
+
+# 6. Non-Hispanic Black
+nhb_coef <- round(coefs["ethnicityNon-Hispanic Black"], 2)
+nhb_pct_increase <- round(100 * (exp(nhb_coef) - 1), 2)
+
+# 7. Non-Hispanic Asian
+nha_coef <- round(coefs["ethnicityNon-Hispanic Asian"], 2)
+nha_pct_increase <- round(100 * (exp(nha_coef) - 1), 2)
+
+# 8. Other/Multi-Racial
+omr_coef <- round(coefs["ethnicityOther/Multi-Racial"], 2)
+omr_pct_increase <- round(100 * (exp(omr_coef) - 1), 2)
+
+# 9. Income-to-Poverty Ratio
+ip_coef <- round(coefs["income_poverty_ratio"], 2)
+ip_pct_increase <- round(100 * (exp(ip_coef) - 1), 2)
+
+# 10. Family History: Yes
+fh_coef <- round(coefs["family_historyYes"], 2)
+fh_pct_increase <- round(100 * (exp(fh_coef) - 1), 2)
+
+# 11. Triglycerides (log)
+tri_coef <- round(coefs["log(triglycerides)"], 2)
+tri_pct_increase <- round(100 * (exp(tri_coef) - 1), 2)
+
+# 12. Insulin (log)
+ins_coef <- round(coefs["log(insulin)"], 2)
+ins_pct_increase <- round(100 * (exp(ins_coef) - 1), 2)
+
+```
+
+In the stargazer table above, the waist-to-height ratio coefficient in the simple regression model decreases from `r coef_mod1` to `r coef_mod2` in the multiple regression model. Additionally the adjusted p-value (see Appendix E) of `r sprintf("p = %.2f", pval_whr_adj)`\>0.05 threshold indicates that in the extended model, the waist-to-height ratio is not a statistically significant predictor variable. This is a notable result as it would imply the presence of confounder variables in the simple linear model inflating the significance of the coefficient. This is an example of omitted variable bias where β1 (The coefficient of waist-to-height ratio) should move closer to 0.
+
+The multiple linear regression when clustering for different ethnicities (in particular Black and Asian) shows a statistically significant difference in predicting A1C levels when compared to the base group - Non-Hispanic Whites. A 1 unit increase in the waist-to-height ratio in Non-Hispanic Blacks and Asians are linked to `r nhb_pct_increase`% and `r nha_pct_increase`% increase respectively in A1C levels relative to the reference group while keeping other variables fixed. This is also an interesting result because it aligns with studies indicating that Asian countries tend to have the highest number of diabetic patients^\[9\]^.
+
+One of the most important variables that is tied to diabetes and A1C levels is insulin. Our adjusted p-value = `r pval_ins_adj` indicates that the log(insulin) is a highly significant variable in our analysis. Given a proportional change in log(insulin) concentration, the log(insulin) coefficient (`r ins_coef`) describes the percent change in A1C.
+
+A limitation of our study stems from the presence of NA values in our surveyed dataset. Filtering out NA values puts us at risk of a selection bias where our sample values used in our model are no longer representative of the larger sampled population. Going forward, one possible solution to avoid this is to use predictor variables without missing values. Another limitation of this study is the violation of the normality assumption which brings into question our calculated p-values and its respective significance. Going forward, further work can be done to use different predictor variables or transformations to improve the model. Interaction between predictor variables can be added to see if there are multiplicative effects of the predictor variables on the outcome variable.
+
+In conclusion, our study shows that there is not a significant relationship between waist-to-height ratio and A1C levels. There is a weak association such that an increase in waist-to-height ratio is associated with an increase in A1C. Interestingly, there are a multitude of biological and socio-economic factors that are potentially more influential than waist-to-height ratio based on statistical significance such as log(insulin), ethnicity etc. With this study, clinicians and researchers have another statistical analysis looking at the relationship between A1C and health indicators that will help improve identifying patients at higher risk for diabetes.
+
+\newpage
+
+## References
+
+1.  Centers for Disease Control and Prevention. (2023). National Diabetes Statistics Report: Estimates of diabetes and its burden in the United States. U.S. Department of Health and Human Services. https://www.cdc.gov/diabetes/php/data-research/index.html
+
+2.  American Diabetes Association; 2. Classification and Diagnosis of Diabetes: Standards of Medical Care in Diabetes—2020. Diabetes Care 1 January 2020; 43 (Supplement_1): S14–S31.
+
+3.  Kuerban, A. (2020). Beyond Asian-specific cutoffs: Gender effects on the predictability of body mass index, waist circumference, and waist circumference-to-height ratio on hemoglobin A1c. PLOS ONE, 15(8), e0237095.
+
+4.  Ashwell M, Gunn P, Gibson S. Waist-to-height ratio is a better screening tool than waist circumference and BMI for adult cardiometabolic risk factors: systematic review and meta-analysis. Obes Rev. 2012;13(3):275–86.
+
+5.  Browning LM, Hsieh SD, Ashwell M. A systematic review of waist-to-height ratio as a screening tool for the prediction of cardiovascular disease and diabetes: 0·5 could be a suitable global boundary value. Nutr Res Rev. 2010;23(2):247–69.
+
+6.  Yang H, Xin Z, Feng J-P, Yang J-K. Waist-to-height ratio is better than body mass index and waist circumference as a screening criterion for metabolic syndrome in Han Chinese adults. Medicine (Baltimore). 2017;96(39).
+
+7.  Centers for Disease Control and Prevention. (2023). NHANES analytic guidelines: Sample design. National Center for Health Statistics.
+
+8.  U.S Department of Health and Human Services. (n.d.). Poverty guidelines. Office of the Assistant Secretary for Planning and Evaluation. https://aspe.hhs.gov/topics/poverty-economic-mobility/poverty-guidelines 
+
+9.  International Diabetes Federation. IDF diabetes atlas. International Diabetes Federation; 2017
+
+\newpage
+
+## Appendix
+
+**Appendix A. Dataset Links**
+
+1.  NHANES datasets: [Link](https://wwwn.cdc.gov/nchs/nhanes/continuousnhanes/default.aspx?BeginYear=2017)
+2.  DIQ_J - Diabetes questionnaire: (Family-History): [Link](https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/DIQ_J.htm)
+3.  DEMO_J - Demographics (Age, Gender, Ethnicity, Income-to-Poverty Ratio): [Link](https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/DEMO_J.htm)
+4.  GHB_J - Glycemic indicators (A1C): [Link](https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/GHB_J.htm)
+5.  BMX_J - Body measurements (Waist and Height Measurements): [Link](https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/BMX_J.htm)
+6.  TRIGLY_J - Triglyceride (Triglycerides): [Link](https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/TRIGLY_J.htm)
+7.  INS_J- Insulin (Insulin): [Link](https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2017/DataFiles/INS_J.htm)
+
+**Appendix B. Model Specifications**
+
+1.  $\text{A1C} = \beta_0 + \beta_1 \cdot \text{WaistHeightRatio} + \varepsilon$
+
+    Base simple linear regression model.
+
+2.  $\text{A1C} = \beta_0 + \beta_1 \cdot \text{WaistHeightRatio} + \beta_2 \cdot \text{Age} + \beta_3 \cdot \text{Gender} + \beta_4 \cdot \text{Ethnicity} + \beta_5 \cdot \text{IncomePovertyRatio} + \beta_6 \cdot \text{FamilyHistory} + \beta_7 \cdot \text{Triglycerides} + \beta_8 \cdot \text{Insulin} + \varepsilon$
+
+    Base multiple linear regression model.
+
+3.  $\log(\text{A1C}) = \beta_0 + \beta_1 \cdot \text{WaistHeightRatio} + \varepsilon$
+
+    Log transformation on dependent variable (A1C) improved model 1.
+
+4.  $\log(\text{A1C}) = \beta_0 + \beta_1 \cdot \text{WaistHeightRatio} + \beta_2 \cdot \text{Age} + \beta_3 \cdot \text{Gender} + \beta_4 \cdot \text{Ethnicity} + \beta_5 \cdot \text{IncomePovertyRatio} + \beta_6 \cdot \text{FamilyHistory} + \beta_7 \cdot \text{Triglycerides} + \beta_8 \cdot \text{Insulin} + \varepsilon$
+
+    Log transformation on dependent variable (A1C) improved model 2.
+
+5.  $\log(\text{A1C}) = \beta_0 + \beta_1 \cdot \text{WaistHeightRatio} + \beta_2 \cdot \text{Age} + \beta_3 \cdot \text{Gender} + \beta_4 \cdot \text{Ethnicity} + \beta_5 \cdot \text{IncomePovertyRatio} + \beta_6 \cdot \text{FamilyHistory} + \beta_7 \cdot \log(\text{Triglycerides}) + \beta_8 \cdot \log(\text{Insulin}) + \varepsilon$
+
+    Log transformation on triglycerides and insulin variables as they show a linear relationship with A1C in residuals vs component plots.
+
+**Appendix C. Residuals vs Fitted Plot**
+
+```{r, fig.width=3, fig.height=2, fig.align='center', echo=FALSE}
+par(cex = 0.6)
+plot(model_3, which = 1)
+par(cex = 1.0 )
+```
+
+```{r, include=FALSE}
+vif(model_3)
+```
+
+```{r, include=FALSE}
+
+# Run the tests
+bp_test <- bptest(model_3)
+shapiro_test <- shapiro.test(resid(model_3))
+
+# Create a simple data frame
+test_results <- data.frame(
+  Test = c("Breusch-Pagan", "Shapiro-Wilk"),
+  Statistic = c(round(bp_test$statistic, 3), round(shapiro_test$statistic, 5)),
+  DF = c(bp_test$parameter, NA),
+  `P-Value` = c(
+    formatC(bp_test$p.value, format = "e", digits = 2),
+    formatC(shapiro_test$p.value, format = "e", digits = 2)
+  )
+)
+
+# Output as a basic table
+knitr::kable(test_results, caption = "Tests for Homoscedasticity (BP) and Normality (W) for model_3")
+```
+
+**Appendix D. Distribution of Insulin and Triglycerides**
+
+```{r, fig.align='center', fig.height=3, fig.width=12, out.width='100%', echo=FALSE}
+
+base_theme <- theme_minimal(base_size = 10) +  
+  theme(
+    aspect.ratio = 1,
+    plot.title = element_text(face = "bold", size = 15),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12)
+  )
+
+p1 <- ggplot(exploratory_df, aes(x = insulin)) +
+  geom_histogram(bins = 20, fill = "skyblue", color = "white") +
+  labs(title = "A", x = "Insulin", y = "Count") +
+  base_theme
+
+p2 <- ggplot(exploratory_df, aes(x = triglycerides)) +
+  geom_histogram(bins = 20, fill = "skyblue", color = "white") +
+  labs(title = "B", x = "Triglycerides", y = "Count") +
+  base_theme
+
+p3 <- ggplot(exploratory_df, aes(x = log(insulin))) +
+  geom_histogram(bins = 20, fill = "tomato", color = "white") +
+  labs(title = "C", x = "log(Insulin)", y = "Count") +
+  base_theme
+
+p4 <- ggplot(exploratory_df, aes(x = log(triglycerides))) +
+  geom_histogram(bins = 20, fill = "tomato", color = "white") +
+  labs(title = "D", x = "log(Triglycerides)", y = "Count") +
+  base_theme
+
+# One line layout
+grid.arrange(p1, p2, p3, p4, nrow = 1)
+```
+
+**Appendix E. Holm-Adjusted P-Values**
+
+```{r, results='asis', echo=FALSE}
+# Holm's method to control for Family Wise Error Rate
+# Extract p-values from your model
+
+coefs <- summary(mod2)$coefficients
+raw_pvals <- coefs[, 4]
+
+holm_pvals <- p.adjust(raw_pvals, method = "holm")
+
+# Create table
+holm_table <- data.frame(
+  `Raw P-Value` = formatC(raw_pvals, format = "e", digits = 2),
+  `Adjusted P` = formatC(holm_pvals, format = "e", digits = 2)
+)
+
+knitr::kable(holm_table, caption = "Regression Coefficients with Holm-Adjusted P-Values")
+```
