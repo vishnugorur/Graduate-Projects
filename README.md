@@ -27,7 +27,11 @@ Instructions to run files in the folder
 
 # Waist-to-height-ratio and A1C levels 
 Conducted a statistical study on the relationship between the waist-to-height ratio and A1C levels.
+- Step 1: Clone the repo
+- Step 2: Navigate to the project specific folder
+- Step 3: Run the clean_data.R file to load the files in the raw_data folder
+- Step 4: The cleaned csv should then be loaded into the Lab-2-analysis.Rmd file.
 - Folder contains the final RMD file used to generate all the graphs
-- Note: The code cannot be run but the final report pdf generated is in the repo
+- Note: The file paths need to be adjusted to load the correct data. But the final report pdf generated is in the repo
   
  
