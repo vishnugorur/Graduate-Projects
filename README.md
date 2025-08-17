@@ -25,7 +25,7 @@ Instructions to run files in the folder
 - Step 2: Navigate to the project specific folder
 - Step 3: Run the Unsupervised_learning_RGB.ipynb file with the data from the RGB_colors.csv file. (The data is already loaded in a cell in the notebook)
 
-#Waist-to-height-ratio and A1C levels 
+# Waist-to-height-ratio and A1C levels 
 Conducted a statistical study on the relationship between the waist-to-height ratio and A1C levels.
 - Folder contains the final RMD file used to generate all the graphs
 - Note: The code cannot be run but the final report pdf generated is in the repo
